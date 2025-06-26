@@ -32,6 +32,8 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            position: relative; /* Для позиционирования внутренних элементов, если нужно */
+            z-index: 1; /* Чтобы был под капчей */
         }
 
         #brick-emoji {
@@ -73,7 +75,8 @@
         #promo-section {
             margin-top: 20px;
             padding-top: 20px;
-            border-top: 1px solid rgba(255, 255, 255, 0.3); /* Разделитель */
+
+border-top: 1px solid rgba(255, 255, 255, 0.3); /* Разделитель */
             width: 100%; /* Занимает всю ширину контейнера */
         }
 
@@ -155,9 +158,113 @@
             transform: translateY(0);
             background-color: #c00c00;
         }
+
+        /* --- Стили для Капчи --- */
+        #captcha-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9); /* Темный полупрозрачный фон */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000; /* Поверх всего остального */
+            opacity: 0; /* Изначально скрыта */
+            visibility: hidden; /* Изначально скрыта */
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+
+        #captcha-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .captcha-content {
+            background-color: #ffffff; /* Белый фон для содержимого капчи */
+            color: #333; /* Цвет текста */
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.7);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            box-sizing: border-box;
+        }
+
+        .captcha-content h2 {
+            margin-top: 0;
+            color: #333;
+            font-size: 1.8em;
+            margin-bottom: 20px;
+        }
+
+        .captcha-content p {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 25px;
+            color: #555;
+
+}
+
+        .captcha-content input[type="text"] {
+            width: calc(100% - 30px); /* Учитываем padding */
+            padding: 15px;
+            border: 2px solid #ccc;
+            border-radius: 8px;
+            font-size: 1.4em;
+            text-align: center;
+            outline: none;
+            transition: border-color 0.3s ease;
+            margin-bottom: 20px;
+        }
+
+        .captcha-content input[type="text"]:focus {
+            border-color: #4CAF50;
+        }
+
+        .captcha-content button {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            background-color: #4CAF50;
+            color: white;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: background-color 0.2s ease, transform 0.1s ease;
+        }
+
+        .captcha-content button:hover {
+            background-color: #45a049;
+            transform: translateY(-2px);
+        }
+
+        .captcha-content button:active {
+            transform: translateY(0);
+            background-color: #3e8e41;
+        }
+
+        #captcha-message {
+            margin-top: 15px;
+            font-size: 1.1em;
+            color: red; /* По умолчанию красный для ошибок */
+            min-height: 1.2em;
+        }
     </style>
 </head>
 <body>
+
+    <!-- Капча (поверх всего) -->
+    <div id="captcha-overlay">
+        <div class="captcha-content">
+            <h2>Проверка, что вы не робот</h2>
+            <p id="captcha-problem"></p>
+            <input type="text" id="captcha-answer" placeholder="Ваш ответ" autocomplete="off">
+            <button id="captcha-submit-btn">Отправить</button>
+            <div id="captcha-message"></div>
+        </div>
+    </div>
 
     <div id="game-container">
         <div id="brick-emoji">🧱</div>
@@ -175,6 +282,10 @@
         <button id="reset-progress-btn">Сбросить прогресс</button>
     </div>
 
+    <!-- Аудио элемент для звука -->
+    <!-- Измененный URL для прямого скачивания/воспроизведения файла с Google Drive -->
+    <audio id="clickSound" src="https://drive.google.com/uc?export=download&id=1BgWZo5y8YmaS_bTIsiSYyL7Btw5mXpRo" preload="auto"></audio>
+
     <script>
         // JavaScript логика
         const brick = document.getElementById('brick-emoji');
@@ -186,17 +297,27 @@
         const promoMessageDisplay = document.getElementById('promo-message'); // Для сообщений от промокода
         const resetProgressBtn = document.getElementById('reset-progress-btn'); // Кнопка сброса
 
+        // Элементы капчи
+        const captchaOverlay = document.getElementById('captcha-overlay');
+        const captchaProblemDisplay = document.getElementById('captcha-problem');
+        const captchaAnswerInput = document.getElementById('captcha-answer');
+        const captchaSubmitBtn = document.getElementById('captcha-submit-btn');
+        const captchaMessageDisplay = document.getElementById('captcha-message');
+
+        // Аудио элемент
+        const clickSound = document.getElementById('clickSound');
+
         // Ключи для localStorage
         const VALUE_KEY = 'brickCounterValue';
         const TIMESTAMP_KEY = 'lastBrickClickTimestamp';
         const USED_PROMOS_KEY = 'usedPromoCodes';
+        const CAPTCHA_SOLVED_KEY = 'captchaSolved'; // Новый ключ для капчи
 
         // Промокоды и их значения
         const promoCodes = {
             "promotest": 12.000,
             "promotest1": 5.789,
-
-"secretbonus": 25.000,
+            "secretbonus": 25.000,
             "freebie": 0.500
         };
 
@@ -204,26 +325,24 @@
         let currentValue;
         let lastClickTimestamp;
         let usedPromoCodes;
+        let currentCaptchaAnswer; // Для хранения правильного ответа текущей капчи
 
         // Функция для загрузки состояния из localStorage или инициализации по умолчанию
         function loadState() {
             currentValue = parseFloat(localStorage.getItem(VALUE_KEY)) || 0;
             lastClickTimestamp = parseInt(localStorage.getItem(TIMESTAMP_KEY)) || 0;
             try {
-                // Пытаемся распарсить, если ошибка - используем пустой массив
                 usedPromoCodes = JSON.parse(localStorage.getItem(USED_PROMOS_KEY)) || [];
             } catch (e) {
                 console.error("Ошибка парсинга usedPromoCodes из localStorage:", e);
-                usedPromoCodes = []; // Если данные повреждены, сбрасываем
+                usedPromoCodes = [];
             }
         }
 
         // Функция для сохранения состояния в localStorage
         function saveState() {
-            // Сохраняем значение счётчика как строку с полной точностью (не toFixed для хранения)
             localStorage.setItem(VALUE_KEY, currentValue.toString());
             localStorage.setItem(TIMESTAMP_KEY, lastClickTimestamp.toString());
-            // Сохраняем массив использованных промокодов в JSON-формате
             localStorage.setItem(USED_PROMOS_KEY, JSON.stringify(usedPromoCodes));
         }
 
@@ -236,7 +355,6 @@
         function updateMessage(msg, color = '#ffe0b2') {
             messageDisplay.textContent = msg;
             messageDisplay.style.color = color;
-            // Очищаем сообщение через некоторое время
             if (msg) {
                 setTimeout(() => messageDisplay.textContent = '', 3000);
             }
@@ -246,7 +364,6 @@
         function updatePromoMessage(msg, color = '#ffcc80') {
             promoMessageDisplay.textContent = msg;
             promoMessageDisplay.style.color = color;
-            // Очищаем сообщение через некоторое время
             if (msg) {
                 setTimeout(() => promoMessageDisplay.textContent = '', 4000);
             }
@@ -261,38 +378,141 @@
             return `${hours}ч ${minutes}м ${seconds}с`;
         }
 
-        // --- Инициализация при загрузке страницы ---
-        loadState();
-        updateCounterDisplay();
+        // --- Логика Капчи ---
+        function generateCaptchaProblem() {
+            const num1 = Math.floor(Math.random() * 3001) - 1000; // От -1000 до 2000
+            const num2 = Math.floor(Math.random() * 3001) - 1000; // От -1000 до 2000
+            const operator = Math.random() < 0.5 ? '+' : '-';
 
-        // Проверяем состояние при загрузке страницы и показываем сообщение, если есть ограничение
-        if (lastClickTimestamp) {
-            const now = Date.now();
-            const twentyFourHours = 24 * 60 * 60 * 1000;
-            if (now - lastClickTimestamp < twentyFourHours) {
-                const timeLeft = twentyFourHours - (now - lastClickTimestamp);
-                updateMessage(`Следующий клик через ${formatTimeLeft(timeLeft)}`, 'orange');
+            let problemString;
+            let correctAnswer;
+
+            if (operator === '+') {
+                problemString = `${num1} + ${num2} = ?`;
+                correctAnswer = num1 + num2;
             } else {
-                updateMessage('Кирпич готов к новым прибавлениям!');
+                problemString = `${num1} - ${num2} = ?`;
+                correctAnswer = num1 - num2;
             }
-        } else {
-            updateMessage('Нажмите на кирпич, чтобы начать!');
+
+            captchaProblemDisplay.textContent = problemString;
+            currentCaptchaAnswer = correctAnswer;
+            captchaAnswerInput.value = ''; // Очищаем поле ввода
+            captchaMessageDisplay.textContent = ''; // Очищаем сообщение об ошибке
+            captchaAnswerInput.focus(); // Устанавливаем фокус на поле ввода
         }
-        updatePromoMessage('Введите промокод для бонуса!');
+
+        function showCaptcha() {
+            if (localStorage.getItem(CAPTCHA_SOLVED_KEY) !== 'true') {
+                captchaOverlay.classList.add('active');
+                generateCaptchaProblem();
+                document.body.style.overflow = 'hidden'; // Запретить прокрутку основного контента
+            }
+        }
+
+        function hideCaptcha() {
+            captchaOverlay.classList.remove('active');
+            localStorage.setItem(CAPTCHA_SOLVED_KEY, 'true'); // Устанавливаем флаг, что капча решена
+            document.body.style.overflow = ''; // Разрешить прокрутку
+
+}
+
+        // Обработчик отправки капчи
+        captchaSubmitBtn.addEventListener('click', function() {
+            const userAnswer = parseInt(captchaAnswerInput.value);
+
+            if (isNaN(userAnswer)) {
+                captchaMessageDisplay.textContent = 'Пожалуйста, введите число.';
+                captchaMessageDisplay.style.color = 'red';
+                return;
+            }
+
+            if (userAnswer === currentCaptchaAnswer) {
+                captchaMessageDisplay.textContent = 'Верно! Капча пройдена.';
+                captchaMessageDisplay.style.color = 'green';
+                setTimeout(hideCaptcha, 1000); // Закрыть через 1 секунду
+            } else {
+                captchaMessageDisplay.textContent = 'Неверный ответ. Попробуйте снова.';
+                captchaMessageDisplay.style.color = 'red';
+                generateCaptchaProblem(); // Генерируем новый пример
+            }
+            playClickSound(); // Воспроизвести звук при нажатии на кнопку капчи
+        });
+
+        // Позволяет нажать Enter для отправки ответа капчи
+        captchaAnswerInput.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+                captchaSubmitBtn.click();
+            }
+        });
+
+        // --- Логика звука ---
+        function playClickSound() {
+            // Проверяем, есть ли аудио элемент и можно ли его воспроизвести
+            if (clickSound) {
+                // Если звук уже играет, сбрасываем его на начало
+                clickSound.currentTime = 0;
+                clickSound.play().catch(e => {
+                    // Обработка возможной ошибки, если браузер блокирует автовоспроизведение
+                    console.warn("Ошибка воспроизведения звука:", e);
+                    // Возможно, показать сообщение пользователю или предложить интеракцию для разблокировки
+                });
+            }
+        }
+
+        // Добавляем обработчик событий ко всем кнопкам для воспроизведения звука
+        document.addEventListener('click', function(event) {
+            if (event.target.tagName === 'BUTTON') {
+                playClickSound();
+            }
+        });
+
+        // --- Инициализация при загрузке страницы ---
+        document.addEventListener('DOMContentLoaded', function() {
+            loadState();
+            updateCounterDisplay();
+
+            // Проверяем, нужно ли показывать капчу
+            if (localStorage.getItem(CAPTCHA_SOLVED_KEY) !== 'true') {
+                showCaptcha();
+            } else {
+                // Если капча уже решена, показываем обычное сообщение
+                if (lastClickTimestamp) {
+                    const now = Date.now();
+                    const twentyFourHours = 24 * 60 * 60 * 1000;
+                    if (now - lastClickTimestamp < twentyFourHours) {
+                        const timeLeft = twentyFourHours - (now - lastClickTimestamp);
+                        updateMessage(`Следующий клик через ${formatTimeLeft(timeLeft)}`, 'orange');
+                    } else {
+                        updateMessage('Кирпич готов к новым прибавлениям!');
+                    }
+                } else {
+                    updateMessage('Нажмите на кирпич, чтобы начать!');
+                }
+                updatePromoMessage('Введите промокод для бонуса!');
+            }
+        });
 
 
         // --- Обработчики событий ---
 
         // Обработчик клика по кирпичу
         brick.addEventListener('click', function() {
+            // Проверяем, решена ли капча. Если нет, не даём кликнуть по кирпичу.
+            if (localStorage.getItem(CAPTCHA_SOLVED_KEY) !== 'true') {
+                showCaptcha(); // Предложить решить капчу
+                updateMessage('Сначала решите капчу!', 'red');
+                return;
+            }
+
+            playClickSound(); // Воспроизвести звук при клике на кирпич
+
             const now = Date.now(); // Текущая временная метка в миллисекундах
             const twentyFourHours = 24 * 60 * 60 * 1000; // 24 часа в миллисекундах
 
             // Проверка на ограничение 24 часа
             if (lastClickTimestamp && (now - lastClickTimestamp < twentyFourHours)) {
-                const timeLeft = twentyFourHours
-
-- (now - lastClickTimestamp);
+                const timeLeft = twentyFourHours - (now - lastClickTimestamp);
                 updateMessage(`Следующий клик возможен через ${formatTimeLeft(timeLeft)}`, 'orange');
                 return;
             }
@@ -302,7 +522,6 @@
             const max = 1.000;
             const randomIncrease = Math.random() * (max - min) + min;
 
-            // Убеждаемся, что currentValue - это число перед добавлением
             currentValue = parseFloat(currentValue) + randomIncrease;
 
             updateCounterDisplay(); // Обновляем отображение счётчика
@@ -326,7 +545,6 @@
                     updatePromoMessage(`Промокод "${enteredCode}" уже был использован.`, 'red');
                 } else {
                     const promoValue = promoCodes[enteredCode];
-                    // Убеждаемся, что currentValue - это число перед добавлением
                     currentValue = parseFloat(currentValue) + promoValue;
 
                     usedPromoCodes.push(enteredCode); // Добавляем промокод в список использованных
@@ -344,12 +562,13 @@
 
         // Обработчик для кнопки сброса прогресса
         resetProgressBtn.addEventListener('click', function() {
-            if (confirm('Вы уверены, что хотите сбросить весь прогресс? Это действие необратимо.')) {
+            if (confirm('Вы уверены, что хотите сбросить весь прогресс, включая статус капчи? Это действие необратимо.')) {
                 localStorage.clear(); // Очищаем весь localStorage для текущего домена
                 loadState(); // Перезагружаем состояние по умолчанию
                 updateCounterDisplay(); // Обновляем отображение
                 updateMessage('Прогресс сброшен! Нажмите на кирпич, чтобы начать.', 'lightgreen');
                 updatePromoMessage('Введите промокод для бонуса!');
+                showCaptcha(); // Сбросили localStorage, значит, капча появится снова
             }
         });
 
